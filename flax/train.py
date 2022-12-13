@@ -3,10 +3,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from flax.metrics import tensorboard
 from flax import linen as nn
 from flax.training import train_state
 import ml_collections
-import tensorflow_dataset as tfds
+import tensorflow_datasets as tfds
 
 
 def load_datasets():
@@ -35,9 +36,52 @@ class CNN(nn.Module):
         return x
 
 
+def create_train_state(rng, config):
+    cnn = CNN()
+    params = cnn.init(rng, jnp.ones((1,28,28,1)))['params']
+    tx = optax.sgd(config.learning_rate, config.momentum)
+    return train_state.TrainState.create(apply_fn=cnn.apply, params=params,
+            tx=tx)
 
 
-def train_and_evaluate(config: ml_collections.FrozenConfigDict(), workdir:
+@jax.jit
+def apply_model(state, images, labels):
+    def loss_fn(params):
+        logits = state.apply_fn({'params': params}, images)
+        one_hot = jax.nn.one_hot(labels, 10)
+        loss = jnp.mean(optax.softmax_cross_entropy(logits=logits,
+            labels=one_hot))
+        return loss, logits
+
+    (loss, logits), grads = jax.value_and_grad(loss_fn,
+            has_aux=True)(state.params)
+    accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
+    return grads, loss, accuracy
+
+
+def train_epoch(state, train_ds, batch_size, rng):
+    train_ds_size = len(train_ds['image'])
+    steps = train_ds_size // batch_size
+
+    perms = jax.random.permutation(rng, len(train_ds['image']))
+    perms = perms[:steps*batch_size]
+    perms = perms.reshape((steps, batch_size))
+
+    epoch_loss = []
+    epoch_accuracy = []
+    for perm in perms:
+        batch_images = train_ds['image'][perm, ...]
+        batch_labels = train_ds['label'][perm, ...]
+        grads, loss, accuracy = apply_model(state, batch_images, batch_labels)
+        state = state.apply_gradients(grads=grads)
+        epoch_loss.append(loss)
+        epoch_accuracy.append(accuracy)
+    train_loss = np.mean(epoch_loss)
+    train_accuracy = np.mean(epoch_accuracy)
+
+    return state, train_loss, train_accuracy
+
+def train_and_evaluate(config: ml_collections.ConfigDict(), workdir:
         str) -> train_state.TrainState:
     train_ds, test_ds = load_datasets()
     rng = jax.random.PRNGKey(0)
@@ -52,10 +96,11 @@ def train_and_evaluate(config: ml_collections.FrozenConfigDict(), workdir:
         rng, epoch_rng = jax.random.split(rng)
         state, loss, accuracy = train_epoch(state, train_ds, config.batch_size,
                 epoch_rng)
-        _, test_loss, test_accuracy = apply_model(state, test_ds)
+        _, test_loss, test_accuracy = apply_model(state, test_ds['image'],
+                test_ds['label'])
 
-        logging.info("epoch: %3d, loss: %.2f, test_loss: %.2f, test_accuracy:
-        %.2f" % (loss, test_loss, test_accuracy))
+        logging.info("epoch: %3d, loss: %.3f, test_loss: %.3f, test_accuracy: \
+        %.3f" % (epoch, loss, test_loss, test_accuracy))
 
         summary_writer.scalar("train_loss", loss, epoch)
 

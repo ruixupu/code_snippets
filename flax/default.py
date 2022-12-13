@@ -2,7 +2,7 @@ import ml_collections
 
 def get_config():
 
-    config = ml_collections.FrozenConfigDict()
+    config = ml_collections.ConfigDict()
 
     config.learning_rate = 0.1
     config.momentum = 0.9
