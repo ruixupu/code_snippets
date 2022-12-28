@@ -14,8 +14,8 @@ def fn_with_estimator(forward_fn: Callable[..., jnp.ndarray],
         _, vjp_fn = jax.vjp(estimator_fn, *args)
         return f(*args), vjp_fn
 
-    def f_rev(vjp_fn, x_dot):
-        return vjp_fn(x_dot)
+    def f_rev(vjp_fn, y_dot):
+        return vjp_fn(y_dot)
 
     f.defvjp(f_fwd, f_rev)
     return f

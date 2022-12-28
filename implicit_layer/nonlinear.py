@@ -36,7 +36,7 @@ def main():
     fn = lambda p, x: x - p / x**2
     grad_fn = lambda p,x : 2.0*x/(1.0+2.0*p/x**3)/x**2
 
-    p = 4.1
+    p = 8.1
     x_star = solver(fn, p)
     print('expected_value_grad:', x_star, grad_fn(p, x_star))
 
